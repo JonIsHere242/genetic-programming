@@ -5,7 +5,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, mutual_info
 import warnings
 from Program import Program
 from Nodes import Node, NodeType
-from OperationConfig import OperationConfig
+from OperationConfig import OperationConfig, OperationWeightPreset
 from TreeComplexity import TreeComplexity, ComplexityMode, ComplexityMetrics
 import random
 from dataclasses import dataclass
@@ -14,11 +14,11 @@ import math
 from multiprocessing import Pool, cpu_count
 from Verbose import VerboseHandler, GenerationMetrics
 import tqdm as tqdm
+from GuidedEvolution import MCTSOptimizer
 
 
 
-
-@dataclass
+@dataclass 
 class FitnessMetrics:
     """Stores various fitness metrics for a program"""
     mae: float = float('inf')
@@ -212,24 +212,14 @@ class PopulationManager:
                  complexity_ratio_limit: float = 100.0,
                  verbose: int = 1,
                  output_prefix: str = "",
-                 use_progress_bar: bool = True):
-        
-
+                 use_progress_bar: bool = True,
+                 total_generations: int = 10,
+                 operation_preset: OperationWeightPreset = OperationWeightPreset.RANDOM):
         """
         Initialize Population Manager.
 
-        Args:
-            population_size: Number of programs in population
-            max_depth: Maximum depth of program trees
-            features: List of available feature names
-            fitness_function: Custom fitness function (optional)
-            tournament_size: Size of tournament for selection
-            parsimony_coefficient: Weight for complexity penalty
-            complexity_mode: Mode for calculating program complexity
-            complexity_ratio_limit: Maximum allowed ratio of solution complexity relative to best
-            verbose: Verbosity level (0=minimal, 1=standard, 2=detailed including code export)
-            output_prefix: Prefix for output files (e.g., "ZZZ_" or "debug_")
-            use_progress_bar: Whether to show progress bars
+        Additional Args:
+            operation_preset: Preset weights for different operations (default: RANDOM)
         """
         self.population_size = population_size
         self.max_depth = max_depth
@@ -243,18 +233,20 @@ class PopulationManager:
         self.best_program: Optional[Program] = None
         self.best_complexity: Optional[float] = None
         self.generation = 0
+        self.operation_preset = operation_preset
         
-        # Initialize verbose handler
+        # Initialize verbose handler with total_generations
         output_dir = f"{output_prefix}gp_outputs" if output_prefix else "gp_outputs"
         self.verbose_handler = VerboseHandler(
             level=verbose,
             use_progress_bar=use_progress_bar,
             output_dir=output_dir,
-            feature_names=features
+            feature_names=features,
+            total_generations=total_generations
         )
-        
+    
     def initialize_population(self) -> None:
-        """Initialize population with random programs"""
+        """Initialize population with random programs using specified operation preset"""
         self.population = []
         methods = ['full', 'grow', 'ramped']
         
@@ -263,12 +255,11 @@ class PopulationManager:
             program = Program(
                 max_depth=self.max_depth,
                 min_depth=2,
-                available_features=self.features
+                available_features=self.features,
+                weight_preset=self.operation_preset  # Pass the preset to Program
             )
             program.create_initial_program(method=method)
             self.population.append(program)
-            
-
 
 
 
@@ -319,7 +310,33 @@ class PopulationManager:
 
 
 
-
+    def evaluate_single_program(self, program: Program, y_true: np.ndarray, 
+                              data: Dict[str, np.ndarray]) -> None:
+        """Evaluate a single program and set its fitness."""
+        try:
+            # Get program predictions
+            y_pred = program.evaluate(data)
+    
+            # Calculate metrics
+            metrics = self._calculate_metrics(y_true, y_pred, program)
+    
+            # Check complexity ratio if we have a reference
+            if self.best_complexity is not None:
+                current_complexity = metrics.complexity_metrics.compute_cost
+                complexity_ratio = current_complexity / self.best_complexity
+    
+                if complexity_ratio > self.complexity_ratio_limit:
+                    metrics.final_score *= (complexity_ratio / self.complexity_ratio_limit)
+    
+            # Use custom fitness function if provided, otherwise use default
+            if self.custom_fitness:
+                program.fitness = self.custom_fitness(y_true, y_pred, metrics)
+            else:
+                program.fitness = metrics.final_score
+    
+        except Exception as e:
+            warnings.warn(f"Error evaluating program: {e}")
+            program.fitness = float('inf')
 
 
 
@@ -481,10 +498,10 @@ class PopulationManager:
 
         self.population = new_population
 
-
-    
-    def run_generation(self, generation: int, y_true: np.ndarray, data: Dict[str, np.ndarray]) -> None:
-        """Run a single generation with verbosity control"""
+    def run_generation(self, generation: int, y_true: np.ndarray, data: Dict[str, np.ndarray], 
+                      use_mcts: bool = False,
+                      mcts_params: Optional[dict] = None) -> None:
+        """Run a single generation with optional MCTS optimization"""
         start_time = time()
 
         # Evaluate fitness
@@ -492,6 +509,47 @@ class PopulationManager:
 
         # Evolve population
         self.evolve_population()
+
+        # Apply MCTS optimization if enabled
+        if use_mcts:
+            # Get top programs
+            sorted_pop = sorted(self.population, key=lambda x: x.fitness)
+            mcts_params = mcts_params or {}
+
+            # Create optimizer with provided or default parameters
+            optimizer = MCTSOptimizer(
+                exploration_weight=mcts_params.get('exploration_weight', 1.414),
+                max_iterations=mcts_params.get('max_iterations', 50),
+                evaluation_samples=mcts_params.get('evaluation_samples', 1000),
+                ucb_constant=mcts_params.get('ucb_constant', 2.0),
+                n_elite=mcts_params.get('n_elite', 5),
+                n_threads=mcts_params.get('n_threads', None)
+            )
+
+            # Temporarily disable verbose output for MCTS optimization
+            original_verbose = self.verbose_handler.level
+            self.verbose_handler.level = 0
+
+            # Get elite programs to optimize
+            elite_programs = sorted_pop[:optimizer.n_elite]
+
+            # Run parallel optimization
+            with Pool(optimizer.n_threads) as pool:
+                optimized_programs = pool.starmap(
+                    optimizer.optimize_program,
+                    [(prog, data, y_true) for prog in elite_programs]
+                )
+
+            # Replace original programs with optimized versions if they're better
+            for i, (orig, opt) in enumerate(zip(elite_programs, optimized_programs)):
+                if opt.fitness < orig.fitness:
+                    self.population[i] = opt
+
+            # Restore original verbose level
+            self.verbose_handler.level = original_verbose
+
+            # Re-evaluate population
+            self.evaluate_fitness(y_true, data)
 
         # Calculate generation metrics
         stats = self.get_population_stats()
@@ -513,15 +571,16 @@ class PopulationManager:
                 runtime=time() - start_time
             )
 
-            # Print generation stats through verbose handler
+            # Print generation stats after all optimization is complete
             self.verbose_handler.print_generation_stats(metrics)
 
-            # Export solution if verbosity level is high enough and it's the last generation
-            if generation == self.generation + 1:  # About to increment generation
+            # Export solution if it's the last generation
+            if generation == self.generation + 1:
                 self.verbose_handler.export_solution(best_program)
 
         self.generation += 1
-
+        # After completing all generations and MCTS steps
+ 
 
 
 
@@ -702,6 +761,7 @@ class ParallelPopulationManager:
             metrics=metrics_list
         )
     
+
     def evolve_population(self):
         """Create next generation through selection and genetic operators"""
         new_population = []

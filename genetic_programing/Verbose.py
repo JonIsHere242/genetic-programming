@@ -30,7 +30,7 @@ class VerboseHandler:
                  use_progress_bar: bool = True,
                  output_dir: str = "gp_outputs",
                  feature_names: List[str] = None,
-                 total_generations: int = 5):
+                 total_generations: int = 10):  # Set a default but require it to be passed
         self.level = level
         self.use_progress_bar = use_progress_bar
         self.output_dir = Path(output_dir)
@@ -50,14 +50,15 @@ class VerboseHandler:
             print(header_line)
             print(separator_line)
         
-        # Initialize progress bar
+        # Initialize progress bar immediately if we're using it
         self.progress_bar = None
-        if self.use_progress_bar and total_generations > 0:
-            self.progress_bar = tqdm(total=total_generations, 
-                                     desc="Evolution Progress",
-                                     unit="gen",
-                                     leave=True)
-    
+        if self.use_progress_bar and self.level > 0:
+            self.progress_bar = tqdm(total=self.total_generations, 
+                                   desc="Evolution Progress",
+                                   unit="gen",
+                                   leave=True,
+                                   position=0)
+
     def print_generation_stats(self, metrics: GenerationMetrics):
         """Print a single line for this generation, with improvements."""
         if self.level == 0:
@@ -88,52 +89,19 @@ class VerboseHandler:
         # Print the row above the progress bar
         if self.use_progress_bar:
             tqdm.write(row_str)
-            time.sleep(0.05)  # Small delay to stabilize
         else:
             print(row_str)
         
         if self.progress_bar is not None:
             self.progress_bar.update(1)
-    
-    def print_final_summary(self):
-        """Print final summary statistics."""
-        if self.level == 0 or not self.generation_history:
-            return
-        
-        if self.progress_bar is not None:
-            self.progress_bar.close()
-            self.progress_bar = None
-        
-        initial = self.generation_history[0]
-        final = self.generation_history[-1]
-        
-        improvement = (initial.best_fitness - final.best_fitness) / abs(initial.best_fitness) * 100
-        mae_improvement = (initial.mae - final.mae) / abs(initial.mae) * 100
-        
-        # Define summary headers and widths
-        summary_headers = ["Metric", "Improvement"]
-        summary_column_widths = [30, 15]
-        
-        # Print Final Summary
-        print("\nFinal Summary:")
-        summary_header_str = "".join(f"{header:<{width}}" for header, width in zip(summary_headers, summary_column_widths))
-        summary_separator_str = "".join("-" * width for width in summary_column_widths)
-        print(summary_header_str)
-        print(summary_separator_str)
-        
-        summary_rows = [
-            ["Best Fitness Improvement", f"{improvement:+.1f}%"],
-            ["MAE Improvement", f"{mae_improvement:+.1f}%"]
-        ]
-        
-        for row in summary_rows:
-            row_str = "".join(f"{cell:<{width}}" for cell, width in zip(row, summary_column_widths))
-            print(row_str)
-        print()
-    
+
     def __del__(self):
         if self.progress_bar is not None:
             self.progress_bar.close()
+
+
+
+
 
     def _node_to_python(self, node) -> str:
         """Convert a node to actual Python code using real feature names"""
