@@ -1,37 +1,47 @@
 # Genetic Programming Library
 
-A robust genetic programming library for symbolic regression with a focus on computational complexity awareness, domain-specific operation presets, and exportable solutions. Built with scikit-learn compatibility in mind, this library is designed to evolve meaningful and efficient mathematical expressions tailored to specific domains. Currently a work in progress and under active development.
+A sophisticated symbolic regression framework that pushes the boundaries of genetic programming through advanced optimization techniques. At its core, the library combines Monte Carlo Tree Search with innovative complexity analysis to evolve highly efficient mathematical expressions. Built with production-grade features including metaprogrammatic code generation, parallel processing capabilities, and domain-specific customization options, this library represents a significant advancement in automated mathematical modeling.
 
 ## Features
 
-- **Scikit-learn Compatible API**
-  - Seamlessly integrates with existing machine learning workflows, enabling easy use alongside other scikit-learn estimators and utilities.
-
-- **Domain-Specific Operation Presets**
-  - Initializes the population with operation weight distributions tailored to specific domains (e.g., Physics, Finance, Biology). This targeted initialization ensures that the initial random programs possess characteristics relevant to the problem domain, enhancing evolutionary search efficiency and leading to more meaningful and accurate models compared to purely random initialization methods.
-
-- **Dynamic Complexity Evaluation Modes**
-  - **Simple Mode**: Fast evaluation based on node count and tree depth, suitable for small expressions or rapid prototyping.
-  - **Compute Mode**: Detailed computational complexity analysis considering operation costs and memory usage, ideal for production environments where solution efficiency is critical.
-  - **Hybrid Mode**: Adaptive switching between Simple and Compute modes based on tree size and presence of expensive operations, providing a balance between evaluation speed and accuracy.
-
-- **Metaprogrammatic Verbosity**
-  - Automatically exports evolved symbolic expressions as executable Python code, facilitating easy validation, testing, and integration into other applications or workflows. The export includes proper feature name mapping and numerical stability safeguards.
-
 - **Monte Carlo Tree Search (MCTS) Optimization**
-  - Enhances the search for optimal solutions by integrating MCTS to optimize elite programs, refining high-performing expressions and accelerating convergence towards optimal solutions.
+  - Leverages MCTS algorithms to intelligently explore and optimize elite solutions
+  - Dramatically accelerates convergence through guided evolutionary search
+  - Refines high-performing expressions with strategic tree modifications
+  - Maintains solution diversity while pursuing optimal candidates
 
 - **Advanced Complexity Analysis**
-  - Employs a robust complexity analysis mechanism with three distinct modes (Simple, Compute, Hybrid) to evaluate and manage the complexity of evolved expression trees effectively.
+  - **Compute Mode**: Production-grade complexity analysis considering operation costs, memory usage, and computational overhead
+  - **Simple Mode**: Rapid evaluation based on structural metrics for fast prototyping
+  - **Hybrid Mode**: Dynamic switching between evaluation methods based on expression characteristics
+  - Real-time complexity monitoring and optimization during evolution
 
-- **Parallel Processing**
-  - Utilizes multiprocessing to expedite both the evolutionary process and MCTS optimization, ensuring scalability and efficient use of computational resources.
+- **Metaprogrammatic Solution Generation**
+  - Automatically exports evolved expressions as production-ready Python code
+  - Generates comprehensive documentation including performance metrics and usage examples
+  - Implements proper feature name mapping for seamless integration
+  - Includes numerical stability safeguards in exported solutions
 
-- **Customizable Operation Configurations**
-  - Supports multiple operation weight presets defined in `OperationConfig`, allowing users to guide the evolution process towards domain-specific expressions. Users can also define custom operation weights for specialized applications.
+- **Parallel Processing Architecture**
+  - Leverages multiprocessing for evolutionary computations
+  - Parallel MCTS optimization of elite programs
+  - Scalable design for high-performance computing environments
+  - Efficient resource utilization across available cores
 
-- **Built-in Numerical Stability Safeguards**
-  - Incorporates safeguards to handle numerical stability issues, such as division by zero and overflow, ensuring robust and reliable model performance.
+- **Domain-Specific Evolution**
+  - **Operation Preset System**: Tailored initialization weights for specific domains:
+    - Physics: Emphasizes trigonometric and differential operations
+    - Finance: Prioritizes exponential and ratio calculations
+    - Biology: Focuses on growth and decay patterns
+    - Custom: User-defined operation distributions
+  - Smart initialization ensuring domain-relevant starting populations
+  - Configurable constraints maintaining problem-specific requirements
+
+- **Production-Ready Features**
+  - Scikit-learn compatible API for seamless integration
+  - Built-in numerical stability safeguards
+  - Comprehensive error handling and validation
+  - Detailed logging and progress monitoring
 
 ## Installation
 
@@ -88,7 +98,7 @@ SymbolicRegressor(
     complexity_ratio_limit=10.0,    # Maximum complexity ratio to maintain diversity
     crossover_probability=0.7,      # Probability of performing crossover
     mutation_probability=0.3,       # Probability of mutating a program
-    operation_preset="physics",     # Operation weight preset ('random', 'natural', 'basic', 'physics', 'finance', 'biology', 'custom')
+    operation_preset="finance",     # Operation weight preset ('random', 'natural', 'basic', 'physics', 'finance', 'biology', 'custom')
     elite_size=0.05,                # Proportion or number of elite programs to retain
     terminal_probability=0.3,        # Probability of selecting a terminal node during initialization
     constant_range=(-5.0, 5.0),      # Range for sampling constant values
@@ -103,7 +113,7 @@ SymbolicRegressor(
     mcts_threads=None,               # Number of threads for parallel MCTS optimization (None uses all available cores minus one)
     verbose=2,                       # Verbosity level (0=none, 1=progress, 2=detailed with code export)
     verbose_output_dir="gp_outputs", # Directory for verbose output files
-    verbose_output_file="gp_outputs/final_solution.py", # Exact file path for exporting final solution and metrics
+    verbose_output_file="gp_outputs/test.py", # Exact file path for exporting final solution and metrics
     n_jobs=-1,                       # Number of parallel jobs (-1 uses all available processors)
     random_state=42                  # Seed for reproducibility
 )
@@ -195,18 +205,22 @@ Mean Squared Error: 9.2872
 Mean Abs Error:     1.8076
 '''
 
-def predict(data: dict) -> np.ndarray:
-    """
-    Generated prediction function.
 
-    Required features:
-    - x6
-    """
-    return np.clip(
-        data['x6'],
-        -1e6, 1e6
-    )
+def predict(data: dict) -> np.ndarray:
+  """
+  Generated prediction function.
+
+  Required features:
+  - x3
+  - x6
+  - x9
+  """
+  return np.clip(
+    data['x3'] * np.sin(data['x6']) + np.log1p(data['x9']),
+    -1e6, 1e6
+  )
 ```
+
 
 ## Development Status
 
@@ -229,22 +243,6 @@ This library is currently in active development. Ongoing work includes:
 
 ### Enhancing Documentation
 - Expanding comprehensive documentation, including detailed guides, API references, and usage examples.
-
-## Project Structure
-
-```
-genetic_programming/
-├── utils/
-│   ├── __init__.py
-│   ├── Nodes.py
-│   ├── OperationConfig.py
-│   └── Verbose.py
-├── PopulationMGMT.py
-├── Program.py
-├── SymbolicRegressor.py
-├── TestDataset.py
-└── TreeComplexity.py
-```
 
 ## Author
 Jonathan Bellmont (masamunex9000@gmail.com)
