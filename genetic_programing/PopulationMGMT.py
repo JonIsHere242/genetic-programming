@@ -53,14 +53,14 @@ class GeneticOperators:
         """Perform crossover between two parent programs"""
         if random.random() > crossover_prob:
             return parent1.copy(), parent2.copy()
-            
+
         child1 = parent1.copy()
         child2 = parent2.copy()
-        
+
         # Get all nodes from both parents
         nodes1 = GeneticOperators._get_all_nodes(child1.root)
         nodes2 = GeneticOperators._get_all_nodes(child2.root)
-        
+
         if not nodes1 or not nodes2:
             return child1, child2
             
@@ -312,33 +312,89 @@ class PopulationManager:
 
     def evaluate_single_program(self, program: Program, y_true: np.ndarray, 
                               data: Dict[str, np.ndarray]) -> None:
-        """Evaluate a single program and set its fitness."""
+        """
+        Evaluate a single program and set its fitness with robust error handling.
+        
+        Args:
+            program: Program to evaluate
+            y_true: True target values
+            data: Dictionary of feature arrays
+        """
         try:
-            # Get program predictions
-            y_pred = program.evaluate(data)
+            # Get program predictions with timeout and error catching
+            try:
+                y_pred = program.evaluate(data)
+                
+                # Check for invalid predictions
+                if y_pred is None or not isinstance(y_pred, np.ndarray):
+                    program.fitness = float('inf')
+                    return
+                    
+                # Check for NaN or Inf values
+                if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+                    program.fitness = float('inf')
+                    return
+                    
+                # Ensure matching shapes
+                if y_pred.shape != y_true.shape:
+                    program.fitness = float('inf')
+                    return
+                    
+            except Exception as e:
+                program.fitness = float('inf')
+                return
     
-            # Calculate metrics
-            metrics = self._calculate_metrics(y_true, y_pred, program)
+            # Calculate metrics with error handling
+            try:
+                metrics = self._calculate_metrics(y_true, y_pred, program)
+                if metrics is None:
+                    program.fitness = float('inf')
+                    return
+            except Exception as e:
+                program.fitness = float('inf')
+                return
     
-            # Check complexity ratio if we have a reference
-            if self.best_complexity is not None:
-                current_complexity = metrics.complexity_metrics.compute_cost
-                complexity_ratio = current_complexity / self.best_complexity
+            # Handle complexity ratio calculation safely
+            try:
+                if self.best_complexity is not None and self.best_complexity > 0:
+                    current_complexity = metrics.complexity_metrics.compute_cost
+                    
+                    # Ensure both values are positive and non-zero
+                    if current_complexity > 0:
+                        complexity_ratio = current_complexity / self.best_complexity
+                        
+                        # Apply penalty if ratio exceeds limit
+                        if complexity_ratio > self.complexity_ratio_limit:
+                            # Use log scaling to prevent excessive penalties
+                            penalty = np.log1p(complexity_ratio / self.complexity_ratio_limit)
+                            metrics.final_score *= (1.0 + penalty)
+            except Exception as e:
+                # Don't fail completely on complexity calculation error
+                pass
+            
+            # Set final fitness
+            try:
+                if self.custom_fitness:
+                    program.fitness = self.custom_fitness(y_true, y_pred, metrics)
+                else:
+                    program.fitness = metrics.final_score
     
-                if complexity_ratio > self.complexity_ratio_limit:
-                    metrics.final_score *= (complexity_ratio / self.complexity_ratio_limit)
-    
-            # Use custom fitness function if provided, otherwise use default
-            if self.custom_fitness:
-                program.fitness = self.custom_fitness(y_true, y_pred, metrics)
-            else:
-                program.fitness = metrics.final_score
+                # Final sanity check on fitness value
+                if not np.isfinite(program.fitness):
+                    program.fitness = float('inf')
+                    
+            except Exception as e:
+                program.fitness = float('inf')
     
         except Exception as e:
-            warnings.warn(f"Error evaluating program: {e}")
+            # Catch any remaining unhandled exceptions
             program.fitness = float('inf')
-
-
+            
+        # Final validation
+        if not hasattr(program, 'fitness') or program.fitness is None:
+            program.fitness = float('inf')
+    
+    
 
     def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray, 
                           program: Program) -> FitnessMetrics:
