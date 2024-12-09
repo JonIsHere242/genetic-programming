@@ -168,20 +168,102 @@ sr = SymbolicRegressor(
 
 ## Complexity Evaluation Modes
 
+The library implements a sophisticated complexity evaluation system that considers both computational costs and memory usage of evolved expressions. This system helps guide evolution toward efficient solutions while maintaining performance.
+
 ### Simple Mode
-- Fast Evaluation: Based on node count and tree depth.
-- Low Overhead: Suitable for small expressions or rapid prototyping.
-- Limited Insight: Does not account for operation-specific costs or memory usage.
+- Quick evaluation based on node count and tree depth
+- Suitable for:
+  - Initial prototyping
+  - Small expressions
+  - Rapid evolution cycles
+- Doesn't consider operation-specific costs
+- Lowest overhead for computation
 
 ### Compute Mode
-- Detailed Analysis: Considers computational and memory costs associated with each operation.
-- Operation-Specific Metrics: Uses predefined operation costs and memory requirements for accurate complexity assessment.
-- Production-Ready: Ideal for scenarios where solution efficiency and resource usage are critical.
+- Detailed analysis of computational and memory costs
+- Tracks costs for each operation:
+  ```python
+  # Example operation costs (scale: 1.0 = basic operation)
+  OPERATION_COSTS = {
+      'add': 1.0,          # Basic arithmetic
+      'multiply': 2.0,     # More complex than addition
+      'divide': 3.0,       # Complex with safety checks
+      'sqrt': 4.0,         # Computationally expensive
+      'exp': 3.0,         # Complex mathematical operation
+      'conditional': 2.0   # Includes branching logic
+  }
+  
+  # Memory usage tracking (scale: 1.0 = single array)
+  MEMORY_COSTS = {
+      'add': 1.0,          # Single output array
+      'divide': 2.0,       # Needs mask arrays for zero checks
+      'sqrt': 2.0,         # Intermediate arrays for safety
+      'conditional': 2.0   # Arrays for both branches
+  }
+  ```
+- Includes safety mechanisms:
+  - Value clipping for numerical stability
+  - Domain checks for mathematical operations
+  - Proper handling of edge cases (division by zero, etc.)
+- Best for:
+  - Production environments
+  - Resource-constrained systems
+  - Performance-critical applications
 
 ### Hybrid Mode (Default)
-- Adaptive Switching: Automatically switches between Simple and Compute modes based on tree size and presence of expensive operations.
-- Balanced Approach: Provides a good balance between evaluation speed and accuracy.
-- Optimal for Most Use Cases: Suitable for both small and large expressions, adapting to the complexity of the evolved programs.
+- Dynamically switches between Simple and Compute modes
+- Triggers for switching:
+  - Expression size exceeds threshold
+  - Presence of expensive operations (cost ≥ 3.0)
+  - Memory usage concerns
+- Balances evaluation speed with accuracy
+- Adapts to expression complexity:
+  ```python
+  def is_expensive_operation(operation: str) -> bool:
+      """Check if operation requires detailed cost analysis"""
+      return OPERATION_COSTS.get(operation, 0.0) >= 3.0
+  ```
+
+### Implementation Details
+
+The system uses vectorized NumPy operations for performance while maintaining safety:
+
+```python
+OPERATIONS = {
+    'add': lambda x, y: np.clip(x + y, -1e6, 1e6),
+    'divide': lambda x, y: np.divide(
+        np.clip(x, -1e6, 1e6),
+        np.clip(y, -1e6, 1e6),
+        out=np.zeros_like(x),
+        where=np.abs(y) > 1e-10
+    ),
+    'exp': lambda x: np.clip(
+        np.exp(-np.abs(np.clip(x, -50, 50))), 
+        0, 1e6
+    )
+}
+```
+
+### Benefits of Complexity Management
+
+1. **Optimization Guidance**
+   - Steers evolution toward efficient solutions
+   - Prevents bloat in expressions
+   - Balances accuracy with computational cost
+
+2. **Resource Control**
+   - Manages memory usage
+   - Prevents excessive computation
+   - Ensures stable production deployment
+
+3. **Performance Predictability**
+   - Known costs for operations
+   - Predictable memory usage
+   - Reliable execution times
+
+
+
+
 
 ## Solution Export and Code Generation
 
