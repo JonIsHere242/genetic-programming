@@ -224,46 +224,6 @@ The library implements a sophisticated complexity evaluation system that conside
       return OPERATION_COSTS.get(operation, 0.0) >= 3.0
   ```
 
-### Implementation Details
-
-The system uses vectorized NumPy operations for performance while maintaining safety:
-
-```python
-OPERATIONS = {
-    'add': lambda x, y: np.clip(x + y, -1e6, 1e6),
-    'divide': lambda x, y: np.divide(
-        np.clip(x, -1e6, 1e6),
-        np.clip(y, -1e6, 1e6),
-        out=np.zeros_like(x),
-        where=np.abs(y) > 1e-10
-    ),
-    'exp': lambda x: np.clip(
-        np.exp(-np.abs(np.clip(x, -50, 50))), 
-        0, 1e6
-    )
-}
-```
-
-### Benefits of Complexity Management
-
-1. **Optimization Guidance**
-   - Steers evolution toward efficient solutions
-   - Prevents bloat in expressions
-   - Balances accuracy with computational cost
-
-2. **Resource Control**
-   - Manages memory usage
-   - Prevents excessive computation
-   - Ensures stable production deployment
-
-3. **Performance Predictability**
-   - Known costs for operations
-   - Predictable memory usage
-   - Reliable execution times
-
-
-
-
 
 ## Solution Export and Code Generation
 
