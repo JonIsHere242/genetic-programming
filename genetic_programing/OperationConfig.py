@@ -149,17 +149,29 @@ class OperationConfig:
     # Dictionary of available operations and their implementations
     # Note: Using NumPy operations for vectorized performance; careful handling of domains and zero divisions.
     OPERATIONS = {
-        'add': lambda x, y: x + y,
-        'subtract': lambda x, y: x - y,
-        'multiply': lambda x, y: x * y,
-        'divide': lambda x, y: np.divide(x, y, out=np.zeros_like(x), where=y!=0),  # Safe handling of division by zero
-        'abs': lambda x: np.abs(x),
-        'square': lambda x: x * x,
-        'sqrt': lambda x: np.sqrt(np.abs(x)),   # sqrt is only defined for non-negative inputs
-        'sin': lambda x: np.sin(x),
-        'exp': lambda x: np.exp(-np.abs(x)),    # Exponential with negative absolute for controlled growth
-        'conditional': lambda x, y: np.where(x > 0, y, -y),  # Simple conditional: choose y or -y based on sign of x
-        'safe_divide': lambda x, y: np.divide(x, y+1e-12)    # Example implementation: add epsilon to avoid zero division
+        'add': lambda x, y: np.clip(x + y, -1e6, 1e6),
+        'subtract': lambda x, y: np.clip(x - y, -1e6, 1e6),
+        'multiply': lambda x, y: np.clip(x * y, -1e6, 1e6),
+        'divide': lambda x, y: np.divide(
+            np.clip(x, -1e6, 1e6),
+            np.clip(y, -1e6, 1e6),
+            out=np.zeros_like(x),
+            where=np.abs(y) > 1e-10
+        ),
+        'abs': lambda x: np.clip(np.abs(x), -1e6, 1e6),
+        'square': lambda x: np.clip(x * x, -1e6, 1e6),
+        'sqrt': lambda x: np.sqrt(np.abs(np.clip(x, -1e6, 1e6))),
+        'sin': lambda x: np.sin(np.clip(x, -50, 50)),
+        'exp': lambda x: np.clip(np.exp(-np.abs(np.clip(x, -50, 50))), 0, 1e6),
+        'conditional': lambda x, y: np.where(
+            np.clip(x, -1e6, 1e6) > 0,
+            np.clip(y, -1e6, 1e6),
+            -np.clip(y, -1e6, 1e6)
+        ),
+        'safe_divide': lambda x, y: np.divide(
+            np.clip(x, -1e6, 1e6),
+            1 + np.abs(np.clip(y, -1e6, 1e6))
+        )
     }
     
     # Approximate computational costs for each operation

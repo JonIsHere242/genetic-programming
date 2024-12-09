@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
@@ -8,8 +8,6 @@ import sys
 import os
 import time
 from Nodes import Node, NodeType
-
-
 
 @dataclass
 class GenerationMetrics:
@@ -29,82 +27,170 @@ class VerboseHandler:
                  level: int = 0,
                  use_progress_bar: bool = True,
                  output_dir: str = "gp_outputs",
+                 output_file: Optional[str] = None,  # New parameter
                  feature_names: List[str] = None,
-                 total_generations: int = 10):  # Set a default but require it to be passed
+                 total_generations: int = 10):
         self.level = level
         self.use_progress_bar = use_progress_bar
         self.output_dir = Path(output_dir)
+        self.output_file = Path(output_file) if output_file else None  # Handle optional file
         self.feature_names = feature_names or []
         self.generation_history: List[GenerationMetrics] = []
         self.total_generations = total_generations
+        self.progress_bar = None
+        self.is_final_generation = False
+        
+        # Create output directory if it doesn't exist
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Define headers and column widths
-        self.headers = ['Gen', 'Best Fit', 'Avg Fit', 'MAE', 'Comp Cost', 'Mem Cost']
-        self.column_widths = [5, 20, 12, 20, 15, 12]
+        self.headers = ['Gen', 'Best Fit', 'Avg Fit', 'MAE', 'Comp Cost', 'Time']
+        self.column_widths = [5, 20, 12, 20, 15, 10]
         
-        # Print header
         if self.level > 0:
-            print("Generation Progress:\n")
-            header_line = "".join(f"{header:<{width}}" for header, width in zip(self.headers, self.column_widths))
-            separator_line = "".join("-" * width for width in self.column_widths)
-            print(header_line)
+            print("\nEvolution Progress:")
+            header_line = "".join(f"{header:<{width}}" for header, width 
+                                in zip(self.headers, self.column_widths))
+            separator_line = "-" * sum(self.column_widths)
+            print(f"\n{header_line}")
             print(separator_line)
-        
-        # Initialize progress bar immediately if we're using it
-        self.progress_bar = None
+            
         if self.use_progress_bar and self.level > 0:
             self.progress_bar = tqdm(total=self.total_generations, 
                                    desc="Evolution Progress",
                                    unit="gen",
-                                   leave=True,
-                                   position=0)
+                                   position=0,
+                                   leave=True)
+
+    def _get_used_features(self, node: Node) -> set:
+        """Extract all features used in the expression tree."""
+        if node is None:
+            return set()
+            
+        features = set()
+        if node.node_type == NodeType.FEATURE:
+            features.add(node.value)
+        
+        # Recursively get features from children
+        for child in node.children:
+            features.update(self._get_used_features(child))
+            
+        return features
 
     def print_generation_stats(self, metrics: GenerationMetrics):
-        """Print a single line for this generation, with improvements."""
+        """Print generation statistics with improved formatting."""
         if self.level == 0:
             return
         
         self.generation_history.append(metrics)
         
-        # Calculate improvements relative to the first generation
+        # Calculate improvements
         initial = self.generation_history[0]
-        best_fit_improvement = ((initial.best_fitness - metrics.best_fitness) / abs(initial.best_fitness)) * 100
-        mae_improvement = ((initial.mae - metrics.mae) / abs(initial.mae)) * 100
+        best_fit_improvement = ((initial.best_fitness - metrics.best_fitness) / 
+                              abs(initial.best_fitness)) * 100
+        mae_improvement = ((initial.mae - metrics.mae) / 
+                         abs(initial.mae)) * 100
         
+        # Format strings
         best_fit_str = f"{metrics.best_fitness:.4f} ({best_fit_improvement:+.1f}%)"
         mae_str = f"{metrics.mae:.4f} ({mae_improvement:+.1f}%)"
+        time_str = f"{metrics.runtime:.1f}s"
         
-        # Format the row with fixed widths
         row = [
             str(metrics.generation),
             best_fit_str,
             f"{metrics.avg_fitness:.4f}",
             mae_str,
             f"{metrics.compute_cost:.2e}",
-            f"{metrics.memory_cost:.2e}"
+            time_str
         ]
         
-        row_str = "".join(f"{cell:<{width}}" for cell, width in zip(row, self.column_widths))
+        row_str = "".join(f"{cell:<{width}}" for cell, width 
+                         in zip(row, self.column_widths))
         
-        # Print the row above the progress bar
         if self.use_progress_bar:
+            self.progress_bar.set_description(
+                f"Gen {metrics.generation}: Best={metrics.best_fitness:.4f}"
+            )
+            self.progress_bar.update(1)
+            # Use tqdm.write for clean output with progress bar
             tqdm.write(row_str)
         else:
             print(row_str)
+
+    def export_solution(self, program: Any, test_metrics: dict = None):
+        """Export final solution and metrics to a single file."""
+        if not self.is_final_generation or self.level < 2:
+            return
+            
+        # Determine the output file path
+        if self.output_file:
+            output_file = self.output_file
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = self.output_dir / f"genetic_solution_{timestamp}.py"
         
-        if self.progress_bar is not None:
-            self.progress_bar.update(1)
+        # Get only the features used in the final formula
+        used_features = sorted(self._get_used_features(program.root))
+        
+        with open(output_file, 'w') as f:
+            # Write imports at the top if output_file is new
+            if not self.output_file:
+                f.write("import numpy as np\n\n")
+            
+            # Write the docstring with solution details
+            f.write("'''\n")
+            f.write("Genetic Programming Solution\n")
+            f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            if test_metrics:
+                f.write("Final Test Results:\n")
+                f.write(f"R^2 Score:          {test_metrics.get('r2', 0.0):.4f}\n")
+                f.write(f"Mean Squared Error: {test_metrics.get('mse', 0.0):.4f}\n")
+                f.write(f"Mean Abs Error:     {test_metrics.get('mae', 0.0):.4f}\n")
+            
+            f.write("'''\n\n")
+            
+            # Write the predict function
+            f.write("def predict(data: dict) -> np.ndarray:\n")
+            f.write('    """\n')
+            f.write('    Generated prediction function.\n\n')
+            if used_features:
+                f.write('    Required features:\n')
+                for feature in used_features:
+                    f.write(f'    - {feature}\n')
+            else:
+                f.write('    No features used (constant expression)\n')
+            f.write('    """\n')
+            f.write('    return np.clip(')
+            f.write(self._node_to_python(program.root))
+            f.write(', -1e6, 1e6)\n')
+        
+        if self.level >= 2:
+            tqdm.write(f"\nSolution and metrics exported to: {output_file}")
 
-    def __del__(self):
-        if self.progress_bar is not None:
+    def print_final_results(self, best_program: Any, test_metrics: dict):
+        """Print final results and export solution."""
+        self.is_final_generation = True
+        
+        if self.progress_bar:
             self.progress_bar.close()
+        
+        print("\nFinal Results:")
+        print("-" * 50)
+        print(f"Best R^2 Score:     {test_metrics.get('r2', 0.0):.4f}")
+        print(f"Mean Squared Error: {test_metrics.get('mse', 0.0):.4f}")
+        print(f"Mean Abs Error:     {test_metrics.get('mae', 0.0):.4f}")
+        print("-" * 50)
+        print("\nBest Expression:")
+        print(f"{str(best_program)}")
+        print("-" * 50)
+        
+        # Export solution only once at the end
+        self.export_solution(best_program, test_metrics)
 
-
-
-
-
-    def _node_to_python(self, node) -> str:
-        """Convert a node to actual Python code using real feature names"""
+    def _node_to_python(self, node: Node) -> str:
+        """Convert a node to Python code."""
         if node.node_type == NodeType.CONSTANT:
             return str(node.value)
         elif node.node_type == NodeType.FEATURE:
@@ -118,58 +204,13 @@ class VerboseHandler:
                 return f"({self._node_to_python(node.children[0])} * {self._node_to_python(node.children[1])})"
             elif node.value == 'divide':
                 return f"np.divide({self._node_to_python(node.children[0])}, {self._node_to_python(node.children[1])}, out=np.zeros_like({self._node_to_python(node.children[0])}), where=np.abs({self._node_to_python(node.children[1])}) > 1e-10)"
-            elif node.value == 'abs':
-                return f"np.abs({self._node_to_python(node.children[0])})"
-            elif node.value == 'square':
-                return f"np.square({self._node_to_python(node.children[0])})"
-            elif node.value == 'sqrt':
-                return f"np.sqrt(np.abs({self._node_to_python(node.children[0])}))"
-            elif node.value == 'sin':
-                return f"np.sin(np.clip({self._node_to_python(node.children[0])}, -50, 50))"
-            elif node.value == 'exp':
-                return f"np.clip(np.exp(-np.abs({self._node_to_python(node.children[0])})), 0, 1e6)"
-            elif node.value == 'conditional':
-                return f"np.where({self._node_to_python(node.children[0])} > 0, {self._node_to_python(node.children[1])}, -{self._node_to_python(node.children[1])})"
-            elif node.value == 'safe_divide':
-                return f"np.divide({self._node_to_python(node.children[0])}, 1 + np.abs({self._node_to_python(node.children[1])}))"
-    
-    def export_solution(self, program, timestamp: str = None):
-        if self.level < 2:
-            return
-        
-        if timestamp is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-        code_file = self.output_dir / f"genetic_solution_{timestamp}.py"
-        metrics_file = self.output_dir / f"training_metrics_{timestamp}.txt"
-        
-        # Generate Python solution file
-        with open(code_file, 'w') as f:
-            f.write("import numpy as np\n\n")
-            f.write('def predict(data: dict) -> np.ndarray:\n')
-            f.write('    """\n')
-            f.write('    Predict using the generated genetic program.\n\n')
-            f.write('    Required features:\n')
-            for feature in self.feature_names:
-                f.write(f'    - {feature}\n')
-            f.write('\n')
-            f.write('    Args:\n')
-            f.write('        data: Dictionary mapping feature names to numpy arrays\n')
-            f.write('    Returns:\n')
-            f.write('        numpy.ndarray: Predictions\n')
-            f.write('    """\n')
-            f.write('    # Clip inputs for numerical stability\n')
-            f.write('    ')
-            f.write(f"return np.clip({self._node_to_python(program.root)}, -1e6, 1e6)")
-        
-        if self.generation_history and self.level >= 2:
-            with open(metrics_file, 'w') as f:
-                f.write("Training Metrics:\n\n")
-                for m in self.generation_history:
-                    f.write(f"Generation {m.generation}:\n")
-                    f.write(f"  Best Fitness: {m.best_fitness:.4f}\n")
-                    f.write(f"  Avg Fitness: {m.avg_fitness:.4f}\n")
-                    f.write(f"  MAE: {m.mae:.4f}\n")
-                    f.write(f"  Runtime: {m.runtime:.2f}s\n\n")
-                
-        print(f"\nSolution exported to: {code_file}")
+            elif node.value in ['abs', 'square', 'sqrt', 'sin', 'exp']:
+                return f"np.{node.value}({self._node_to_python(node.children[0])})"
+            else:
+                return str(node)
+        else:
+            return str(node)
+
+    def __del__(self):
+        if self.progress_bar:
+            self.progress_bar.close()

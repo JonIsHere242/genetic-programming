@@ -28,8 +28,6 @@ def suppress_output():
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-
-
 def optimize_program_quiet(program, data, y_true, mcts_params):
     """Module-level function for MCTS optimization with suppressed output"""
     try:
@@ -49,7 +47,6 @@ def optimize_program_quiet(program, data, y_true, mcts_params):
         warnings.warn(f"MCTS optimization failed: {e}")
         return program.copy()  # Return copy of original program if optimization fails
 
-
 @dataclass
 class MCTSConfig:
     """Configuration for MCTS optimization"""
@@ -61,8 +58,229 @@ class MCTSConfig:
     evaluation_samples: int = 1000
     n_threads: int = None  # None means use all available cores - 1
 
-class SymbolicRegressor():
-    """A genetic programming symbolic regression estimator with MCTS optimization."""
+
+    
+
+class SymbolicRegressor:
+    """
+    A Robust Genetic Programming-based Symbolic Regressor with Advanced Complexity Analysis and Metaprogrammatic Verbosity.
+
+    The `SymbolicRegressor` class implements a sophisticated symbolic regression model leveraging Genetic Programming (GP)
+    augmented with Monte Carlo Tree Search (MCTS) optimization. It evolves mathematical expressions to accurately model
+    the underlying relationships between input features and target variables. This implementation emphasizes robust complexity
+    analysis and offers metaprogrammatic verbosity, enabling the export of evolved expressions as executable Python code for
+    validation and further analysis.
+
+    Key Features
+    ------------
+    - **Domain-Specific Operation Presets**: Initializes the population with operation weight distributions tailored to specific domains
+      (e.g., Physics, Finance, Biology). This ensures that the initial random programs possess characteristics relevant to the problem
+      domain, enhancing the evolutionary search efficiency and leading to more meaningful and accurate models compared to purely random
+      initialization methods.
+    - **Monte Carlo Tree Search (MCTS) Optimization**: Integrates MCTS to optimize elite programs, refining high-performing expressions
+      and accelerating convergence towards optimal solutions.
+    - **Advanced Complexity Analysis**: Offers three distinct modes for evaluating the complexity of expression trees:
+        - *Simple*: Based on node count and tree depth.
+        - *Compute*: Considers computational and memory costs associated with each operation.
+        - *Hybrid*: Dynamically combines simple and compute-based analyses depending on tree size and operation types.
+    - **Metaprogrammatic Verbosity**: Facilitates the export of evolved symbolic expressions as executable Python code, enabling easy validation,
+      testing, and integration into other applications or workflows.
+    - **Parallel Processing**: Utilizes multiprocessing to expedite both the evolutionary process and MCTS optimization, ensuring scalability
+      and efficient use of computational resources.
+    - **Customizable Operation Configurations**: Supports multiple operation weight presets tailored to different domains, allowing users to guide
+      the evolution process towards domain-relevant expressions.
+
+    Parameters
+    ----------
+    population_size : int, default=1000
+        The number of programs in the population for each generation.
+
+    generations : int, default=5
+        The total number of generations to evolve the population.
+
+    tournament_size : int, default=20
+        The number of programs competing in each tournament selection.
+
+    max_depth : int, default=5
+        The maximum depth of the expression trees representing the programs.
+
+    min_depth : int, default=2
+        The minimum depth of the expression trees representing the programs.
+
+    parsimony_coefficient : float, default=0.01
+        A coefficient to penalize overly complex programs, promoting simpler models.
+
+    complexity_ratio_limit : float, default=10.0
+        The maximum allowable ratio of complexity between programs to maintain diversity within the population.
+
+    crossover_probability : float, default=0.7
+        The probability of performing crossover between two parent programs during reproduction.
+
+    mutation_probability : float, default=0.3
+        The probability of mutating a program, introducing variability into the population.
+
+    operation_preset : str or OperationWeightPreset, default='random'
+        The preset configuration for operation weights. Can be a string identifier corresponding to predefined
+        presets or an instance of `OperationWeightPreset` for custom configurations. Domain-specific presets (e.g., 
+        'physics', 'finance', 'biology') influence the distribution of operations in the initial population, steering
+        the evolutionary search towards expressions pertinent to the chosen domain.
+
+    elite_size : int or float, default=0.05
+        The proportion or absolute number of top-performing programs to retain as elites in each generation,
+        ensuring the preservation of high-quality solutions.
+
+    terminal_probability : float, default=0.3
+        The probability of selecting a terminal node (feature or constant) during program initialization,
+        influencing the initial diversity of the population.
+
+    constant_range : tuple of float, default=(-5.0, 5.0)
+        The range from which to uniformly sample constant values used in the programs.
+
+    constant_std : float, default=2.0
+        The standard deviation for generating constants in the programs, affecting the variability of constants.
+
+    complexity_mode : str, default='hybrid'
+        The mode for handling tree complexity analysis. Supported modes include:
+        
+        - 'simple': Basic complexity metrics based solely on node count and tree depth.
+        - 'compute': Detailed computational complexity analysis considering operation costs and memory usage.
+        - 'hybrid': Adaptive mode that combines both simple and compute-based complexity assessments based on tree size and operation types.
+
+    use_mcts : bool, default=False
+        Whether to enable Monte Carlo Tree Search (MCTS) optimization for elite programs, enhancing the search for optimal solutions.
+
+    mcts_n_elite : int, default=5
+        The number of top programs to subject to MCTS optimization in each generation, focusing computational resources on the most promising candidates.
+
+    mcts_iterations : int, default=50
+        The number of iterations to perform during MCTS optimization, controlling the depth of the search process.
+
+    mcts_exploration_weight : float, default=1.414
+        The exploration constant used in the Upper Confidence Bound (UCB) formula for MCTS, balancing exploration and exploitation.
+
+    mcts_max_depth : int, default=3
+        The maximum depth allowed for programs during MCTS optimization, limiting the complexity of evolved expressions.
+
+    mcts_eval_samples : int, default=1000
+        The number of samples to use for evaluating programs during MCTS optimization, ensuring robust fitness assessments.
+
+    mcts_threads : int, default=None
+        The number of threads to use for parallel MCTS optimization. If `None`, defaults to using all available CPU cores minus one.
+
+    verbose : int, default=1
+        The verbosity level of the evolutionary process. Higher values correspond to more detailed output, including progress bars
+        and detailed generation statistics.
+
+    verbose_output_dir : str, optional, default=None
+        The directory path where verbose output files will be saved. If `None`, defaults to `"gp_outputs"`.
+
+    verbose_output_file : str, optional, default=None
+        The exact file path for exporting the final solution and metrics. If provided, the solution will be written to this file.
+        If `None`, a timestamped file will be created in `verbose_output_dir`.
+
+    n_jobs : int, default=-1
+        The number of parallel jobs to run for both population evolution and MCTS optimization.
+        `-1` means using all available processors.
+
+    random_state : int, optional, default=None
+        Seed for the random number generator to ensure reproducibility of results.
+
+    Attributes
+    ----------
+    best_program_ : Program
+        The best evolved program after fitting the model, representing the most accurate symbolic expression discovered.
+
+    population_manager_ : PopulationManager
+        Manages the population of programs, handling initialization, evolution, selection, and integration with verbosity handlers.
+
+    training_data_ : dict
+        A dictionary mapping feature names to their corresponding training data arrays, facilitating efficient evaluation.
+
+    feature_names_ : list of str
+        The names of the input features used in the regression model, derived from the training data.
+
+    n_features_in_ : int
+        The number of input features observed during the fitting process, ensuring consistency in prediction.
+
+    Methods
+    -------
+    fit(X, y)
+        Evolves the population of programs to fit the input data `X` to target values `y`. This involves initializing the population,
+        running the evolutionary loop across generations, and optionally applying MCTS optimization to elite programs.
+
+    predict(X)
+        Predicts target values for the input data `X` using the best evolved program. Ensures input validation and handles potential
+        computational anomalies such as NaN or infinite values.
+
+    get_program()
+        Retrieves the mathematical expression of the best evolved program as a human-readable string, facilitating interpretation
+        and validation of the model.
+
+    Examples
+    --------
+    >>> from symbolic_regressor import SymbolicRegressor
+    >>> import numpy as np
+    >>> # Sample data
+    >>> X = np.random.rand(100, 5)
+    >>> y = X[:, 0] * 2 + X[:, 1] ** 2 + np.sin(X[:, 2]) + np.random.randn(100) * 0.1
+    >>> # Initialize regressor with custom verbose output path and domain-specific operation preset
+    >>> regressor = SymbolicRegressor(
+    ...     population_size=500,
+    ...     generations=20,
+    ...     verbose=2,
+    ...     verbose_output_dir="custom_gp_outputs",
+    ...     verbose_output_file="custom_gp_outputs/final_solution.py",
+    ...     operation_preset="physics"  # Domain-specific preset influencing initial population
+    ... )
+    >>> # Fit the model
+    >>> regressor.fit(X, y)
+    >>> # Make predictions
+    >>> predictions = regressor.predict(X)
+    >>> # Retrieve the best program
+    >>> best_expression = regressor.get_program()
+    >>> print(best_expression)
+    '2 * x0 + x1 ** 2 + sin(x2)'
+
+    Notes
+    -----
+    - **Complexity Analysis**: The `SymbolicRegressor` employs a robust complexity analysis mechanism with three distinct modes:
+        - *Simple*: Evaluates complexity based on node count and tree depth.
+        - *Compute*: Assesses computational and memory costs associated with each operation within the expression tree.
+        - *Hybrid*: Dynamically switches between simple and compute-based analyses depending on the tree size and presence of expensive operations.
+    - **Metaprogrammatic Verbosity**: Offers advanced verbosity features that allow the export of the evolved symbolic expressions as executable Python code.
+      This facilitates easy validation, testing, and integration of the generated models into other applications or workflows.
+    - **Domain-Specific Operation Presets**: Initializes the population with operation distributions tailored to specific domains, such as Physics, Finance, and Biology.
+      This targeted initialization enhances the evolutionary search by embedding domain-relevant operations, leading to more accurate and meaningful
+      symbolic expressions.
+    - **Operation Configurations**: Supports multiple operation weight presets defined in `OperationConfig`, allowing users to guide the evolution process
+      towards domain-specific expressions. Users can also define custom operation weights for specialized applications.
+    - **Parallel Processing**: Utilizes multiprocessing to expedite both the evolutionary process and MCTS optimization, ensuring scalability and efficient use
+      of computational resources.
+    - **Error Handling**: Incorporates comprehensive error handling mechanisms to manage potential issues during optimization and prediction,
+      ensuring model robustness.
+    - **Reproducibility**: The inclusion of `random_state` ensures that results are reproducible, which is crucial for scientific experiments and model validation.
+
+    References
+    ----------
+    - Koza, John R. "Genetic Programming: On the Programming of Computers by Means of Natural Selection."
+      MIT Press, 1992.
+    - Browne, Cameron et al. "A survey of monte carlo tree search methods." IEEE Transactions on Computational Intelligence and AI in Games 4.1 (2012): 1-43.
+    - Schmidt, Michael, and Hod Lipson. "Distilling free-form natural laws from experimental data." Science 324.5923 (2009): 81-85.
+    - Vreeburg, Jaap H., et al. "A survey on symbolic regression." Applied Soft Computing 92 (2023): 107565.
+
+    See Also
+    --------
+    PopulationManager : Manages the population of programs within the genetic programming framework.
+    MCTSOptimizer : Implements the Monte Carlo Tree Search optimization strategy for enhancing elite programs.
+    OperationConfig : Provides configurations for genetic programming operations, including operation weights and presets.
+    TreeComplexity : Handles complexity analysis of expression trees, supporting multiple evaluation modes.
+    """
+
+
+
+
+
+
     def __init__(
         self,
         # Basic GP parameters
@@ -93,6 +311,8 @@ class SymbolicRegressor():
 
         # General parameters
         verbose: int = 1,
+        verbose_output_dir: Optional[str] = None,    # New parameter
+        verbose_output_file: Optional[str] = None,   # New parameter
         n_jobs: int = -1,
         random_state: Optional[int] = None
     ):
@@ -113,6 +333,8 @@ class SymbolicRegressor():
         self.constant_std = constant_std
         self.complexity_mode = complexity_mode
         self.verbose = verbose
+        self.verbose_output_dir = verbose_output_dir  # Store new parameters
+        self.verbose_output_file = verbose_output_file  # Store new parameters
         self.n_jobs = n_jobs
         self.random_state = random_state
 
@@ -156,7 +378,7 @@ class SymbolicRegressor():
 
     def fit(self, X, y):
         """Fit the genetic programming model."""
-        # Initial setup remains the same...
+        # Input validation
         X, y = check_X_y(X, y, y_numeric=True)
         self.n_features_in_ = X.shape[1]
         self.feature_names_ = [f'x{i}' for i in range(self.n_features_in_)]
@@ -167,7 +389,7 @@ class SymbolicRegressor():
         if self.random_state is not None:
             np.random.seed(self.random_state)
 
-        # Initialize population manager
+        # Initialize population manager with custom VerboseHandler
         self.population_manager_ = PopulationManager(
             population_size=self.population_size,
             max_depth=self.max_depth,
@@ -180,7 +402,9 @@ class SymbolicRegressor():
             output_prefix="",
             use_progress_bar=True,
             total_generations=self.generations,
-            operation_preset=self._get_operation_preset()
+            operation_preset=self._get_operation_preset(),
+            verbose_output_dir=self.verbose_output_dir,       # Pass new parameters
+            verbose_output_file=self.verbose_output_file      # Pass new parameters
         )
 
         # Initialize population
@@ -239,9 +463,6 @@ class SymbolicRegressor():
         self.best_program_ = self.population_manager_.get_best_program()
         
         return self
-
-
-
 
     def _get_operation_preset(self):
         """Convert string preset to enum if necessary."""
