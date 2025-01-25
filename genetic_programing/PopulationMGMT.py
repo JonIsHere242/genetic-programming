@@ -15,8 +15,8 @@ from multiprocessing import Pool, cpu_count
 from Verbose import VerboseHandler, GenerationMetrics
 import tqdm as tqdm
 from GuidedEvolution import MCTSOptimizer
-
-
+from numba import jit, prange
+from functools import lru_cache
 
 @dataclass 
 class FitnessMetrics:
@@ -42,40 +42,37 @@ class BatchResult:
 
 
 
-
-
 class GeneticOperators:
-    """Handles genetic operations for evolving program populations"""
+    """Handles genetic operations with configurable parameters"""
     
     @staticmethod
     def crossover(parent1: Program, parent2: Program, 
-                 crossover_prob: float = 0.7) -> Tuple[Program, Program]:
-        """Perform crossover between two parent programs"""
+                 crossover_prob: float) -> Tuple[Program, Program]:
+        """Perform crossover with configurable probability"""
         if random.random() > crossover_prob:
             return parent1.copy(), parent2.copy()
 
         child1 = parent1.copy()
         child2 = parent2.copy()
-
-        # Get all nodes from both parents
+        
         nodes1 = GeneticOperators._get_all_nodes(child1.root)
         nodes2 = GeneticOperators._get_all_nodes(child2.root)
 
         if not nodes1 or not nodes2:
             return child1, child2
             
-        # Select random crossover points
         node1 = random.choice(nodes1)
         node2 = random.choice(nodes2)
         
-        # Swap subtrees
         GeneticOperators._swap_nodes(child1.root, child2.root, node1, node2)
         
         return child1, child2
     
     @staticmethod
-    def mutate(program: Program, mutation_prob: float = 0.3) -> Program:
-        """Apply mutation operators to a program"""
+    def mutate(program: Program, 
+               mutation_prob: float,
+               mutation_ops: Dict[str, float]) -> Program:
+        """Apply mutation with configurable operations and probabilities"""
         if random.random() > mutation_prob:
             return program.copy()
             
@@ -85,22 +82,28 @@ class GeneticOperators:
         if not nodes:
             return mutated
             
-        # Select random node for mutation
         node = random.choice(nodes)
         
-        # Apply random mutation operator
-        mutation_ops = [
-            GeneticOperators._point_mutation,
-            GeneticOperators._insert_node,
-            GeneticOperators._delete_node,
-            GeneticOperators._swap_siblings
-        ]
+        # Select mutation operation based on configured weights
+        op_type = random.choices(
+            list(mutation_ops.keys()),
+            weights=list(mutation_ops.values())
+        )[0]
         
-        mutation_op = random.choice(mutation_ops)
-        mutation_op(mutated.root, node)
+        mutation_funcs = {
+            'point': GeneticOperators._point_mutation,
+            'insert': GeneticOperators._insert_node,
+            'delete': GeneticOperators._delete_node,
+            'swap': GeneticOperators._swap_siblings
+        }
+        
+        mutation_funcs[op_type](mutated.root, node)
         
         return mutated
     
+
+
+
     @staticmethod
     def _get_all_nodes(root: Node) -> List[Node]:
         """Get all nodes in the tree"""
@@ -210,17 +213,19 @@ class PopulationManager:
                  parsimony_coefficient: float = 0.01,
                  complexity_mode: ComplexityMode = ComplexityMode.HYBRID,
                  complexity_ratio_limit: float = 100.0,
+                 # Add genetic operation parameters
+                 crossover_probability: float = 0.7,
+                 mutation_probability: float = 0.3,
+                 elitism_ratio: float = 0.05,  # Percentage of population to preserve
+                 mutation_operations: Optional[Dict[str, float]] = None,
+                 # Existing parameters
                  verbose: int = 1,
                  output_prefix: str = "",
                  use_progress_bar: bool = True,
                  total_generations: int = 10,
                  operation_preset: OperationWeightPreset = OperationWeightPreset.RANDOM):
-        """
-        Initialize Population Manager.
-
-        Additional Args:
-            operation_preset: Preset weights for different operations (default: RANDOM)
-        """
+        """Initialize Population Manager with configurable genetic parameters"""
+        # Existing initialization
         self.population_size = population_size
         self.max_depth = max_depth
         self.features = features or []
@@ -229,13 +234,34 @@ class PopulationManager:
         self.parsimony_coefficient = parsimony_coefficient
         self.complexity_mode = complexity_mode
         self.complexity_ratio_limit = complexity_ratio_limit
+        
+        # New genetic parameters
+        self.crossover_probability = crossover_probability
+        self.mutation_probability = mutation_probability
+        self.elitism_ratio = elitism_ratio
+        
+        # Default mutation operation weights if not provided
+        self.mutation_operations = mutation_operations or {
+            'point': 0.4,    # Modify node value
+            'insert': 0.2,   # Insert new node
+            'delete': 0.2,   # Delete node
+            'swap': 0.2      # Swap siblings
+        }
+        
+        # Normalize mutation operation weights
+        total_weight = sum(self.mutation_operations.values())
+        self.mutation_operations = {
+            k: v/total_weight for k, v in self.mutation_operations.items()
+        }
+        
+        # Rest of initialization
         self.population: List[Program] = []
         self.best_program: Optional[Program] = None
         self.best_complexity: Optional[float] = None
         self.generation = 0
         self.operation_preset = operation_preset
         
-        # Initialize verbose handler with total_generations
+        # Verbose handler initialization
         output_dir = f"{output_prefix}gp_outputs" if output_prefix else "gp_outputs"
         self.verbose_handler = VerboseHandler(
             level=verbose,
@@ -262,48 +288,89 @@ class PopulationManager:
             self.population.append(program)
 
 
+    @staticmethod
+    @jit(nopython=True)
+    def _tournament_select_fast(fitnesses: np.ndarray, tournament_size: int) -> int:
+        """Fast tournament selection using pre-computed fitness array"""
+        tournament_idx = np.random.choice(len(fitnesses), tournament_size, replace=False)
+        return tournament_idx[np.argmin(fitnesses[tournament_idx])]
+
+
+    @staticmethod
+    @jit(nopython=True, parallel=True)
+    def _fast_fitness_calc(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float, float]:
+        """Optimized calculation of basic fitness metrics"""
+        diff = y_true - y_pred
+        abs_diff = np.abs(diff)
+        
+        mae = np.mean(abs_diff)
+        mse = np.mean(diff * diff)
+        rmse = np.sqrt(mse)
+        
+        return mae, mse, rmse
+    
+
 
     def evaluate_fitness(self, y_true: np.ndarray, data: Dict[str, np.ndarray]) -> None:
-        """Evaluate fitness with numerically stable complexity penalties"""
+        """Optimized fitness evaluation"""
         best_fitness = float('inf')
-
-        for program in self.population:
+        
+        # Pre-allocate arrays for vectorized operations
+        n_samples = len(y_true)
+        predictions = np.zeros((len(self.population), n_samples))
+        
+        # Batch evaluate programs
+        for i, program in enumerate(self.population):
             try:
-                # Get program predictions
-                y_pred = program.evaluate(data)
-
-                # Calculate metrics
-                metrics = self._calculate_metrics(y_true, y_pred, program)
-
-                # Check complexity ratio if we have a reference
-                if self.best_complexity is not None and self.best_complexity > 0:
-                    current_complexity = metrics.complexity_metrics.compute_cost
-                    complexity_ratio = current_complexity / self.best_complexity
-
-                    # More stable complexity penalty calculation
-                    if complexity_ratio > self.complexity_ratio_limit:
-                        # Use log-space calculation to prevent overflow
-                        log_penalty = (complexity_ratio / self.complexity_ratio_limit - 1)
-                        # Clip the log penalty to prevent extreme values
-                        log_penalty = np.clip(log_penalty, 0, 10)
-                        # Calculate penalty with controlled growth
-                        penalty = 1.0 + np.exp(log_penalty) - 1.0
-                        metrics.final_score *= penalty
-
-                # Use custom fitness function if provided, otherwise use default
-                if self.custom_fitness:
-                    program.fitness = self.custom_fitness(y_true, y_pred, metrics)
+                predictions[i] = program.evaluate(data)
+            except Exception:
+                predictions[i] = np.full(n_samples, np.nan)
+        
+        # Mask invalid predictions
+        mask = np.isfinite(predictions)
+        
+        # Vectorized metrics calculation
+        for i, program in enumerate(self.population):
+            try:
+                prog_mask = mask[i]
+                if not np.any(prog_mask):
+                    program.fitness = float('inf')
+                    continue
+                    
+                # Fast metrics calculation
+                mae, mse, rmse = self._fast_fitness_calc(
+                    y_true[prog_mask], 
+                    predictions[i, prog_mask]
+                )
+                
+                # Get complexity metrics once
+                complexity_metrics = TreeComplexity.analyze(program.root, self.complexity_mode)
+                complexity_score = TreeComplexity.get_complexity_score(complexity_metrics)
+                
+                # Calculate final score efficiently
+                if self.best_complexity and self.best_complexity > 0:
+                    complexity_ratio = complexity_metrics.compute_cost / self.best_complexity
+                    complexity_penalty = np.exp(
+                        np.clip(complexity_ratio / self.complexity_ratio_limit - 1, 0, 10)
+                    ) - 1
                 else:
-                    program.fitness = metrics.final_score
-
-                # Update best program and complexity reference
-                if program.fitness < best_fitness:
-                    best_fitness = program.fitness
+                    complexity_penalty = 0
+                
+                final_score = (
+                    0.35 * mae +
+                    0.25 * rmse +
+                    0.15 * self.parsimony_coefficient * complexity_score
+                ) * (1 + complexity_penalty)
+                
+                program.fitness = final_score
+                
+                # Update best program
+                if final_score < best_fitness:
+                    best_fitness = final_score
                     self.best_program = program.copy()
-                    self.best_complexity = metrics.complexity_metrics.compute_cost
-
-            except Exception as e:
-                warnings.warn(f"Error evaluating program: {e}")
+                    self.best_complexity = complexity_metrics.compute_cost
+                    
+            except Exception:
                 program.fitness = float('inf')
                 
 
@@ -501,10 +568,6 @@ class PopulationManager:
     
         return float('inf') if np.isnan(fitness) else fitness
     
-    def tournament_select(self) -> Program:
-        """Select program using tournament selection"""
-        tournament = random.sample(self.population, self.tournament_size)
-        return min(tournament, key=lambda x: x.fitness)
     
     def get_population_stats(self) -> Dict[str, Union[float, ComplexityMetrics]]:
         """Get statistical information about the population"""
@@ -526,33 +589,65 @@ class PopulationManager:
     
 
     def evolve_population(self):
-        """Create next generation through selection and genetic operators"""
-        new_population = []
-        elite_size = max(1, self.population_size // 20)  # Keep top 5%
+        """Create next generation using configured genetic parameters"""
+        population_size = len(self.population)
+        elite_size = max(1, int(population_size * self.elitism_ratio))
+        
+        # Pre-compute fitness array for fast selection
+        fitnesses = np.array([p.fitness for p in self.population])
+        
+        # Sort once for elitism
+        elite_indices = np.argpartition(fitnesses, elite_size)[:elite_size]
+        new_population = [self.population[i].copy() for i in elite_indices]
+        
+        # Pre-allocate parent arrays
+        parent_indices = np.zeros((2, population_size - elite_size), dtype=np.int32)
+        
+        # Fast tournament selection for all parents at once
+        for i in range(parent_indices.shape[1]):
+            for j in range(2):
+                parent_indices[j, i] = self._tournament_select_fast(
+                    fitnesses, self.tournament_size
+                )
+        
+        # Batch process genetic operations
+        for i in range(0, len(parent_indices[0]), 2):
+            parent1 = self.population[parent_indices[0, i]]
+            parent2 = self.population[parent_indices[1, i]]
+            
+            # Crossover with configured probability
+            if random.random() < self.crossover_probability:
+                child1, child2 = GeneticOperators.crossover(
+                    parent1, parent2, 
+                    self.crossover_probability
+                )
+            else:
+                child1, child2 = parent1.copy(), parent2.copy()
+            
+            # Mutation with configured probability and operations
+            if random.random() < self.mutation_probability:
+                child1 = GeneticOperators.mutate(
+                    child1,
+                    self.mutation_probability,
+                    self.mutation_operations
+                )
+            if random.random() < self.mutation_probability:
+                child2 = GeneticOperators.mutate(
+                    child2,
+                    self.mutation_probability,
+                    self.mutation_operations
+                )
+            
+            new_population.extend([child1, child2])
+            
+            # Ensure population size
+            if len(new_population) >= population_size:
+                break
+        
+        self.population = new_population[:population_size]
 
-        # Sort population by fitness
-        sorted_pop = sorted(self.population, key=lambda x: x.fitness)
 
-        # Elitism - keep best programs
-        new_population.extend(p.copy() for p in sorted_pop[:elite_size])
 
-        # Fill rest of population with offspring
-        while len(new_population) < self.population_size:
-            parent1 = self.tournament_select()
-            parent2 = self.tournament_select()
-
-            # Crossover
-            child1, child2 = GeneticOperators.crossover(parent1, parent2)
-
-            # Mutation
-            child1 = GeneticOperators.mutate(child1)
-            child2 = GeneticOperators.mutate(child2)
-
-            new_population.append(child1)
-            if len(new_population) < self.population_size:
-                new_population.append(child2)
-
-        self.population = new_population
 
     def run_generation(self, generation: int, y_true: np.ndarray, data: Dict[str, np.ndarray], 
                       use_mcts: bool = False,

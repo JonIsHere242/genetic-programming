@@ -17,7 +17,7 @@ class MCTSNode:
     children: List['MCTSNode'] = None
     visits: int = 0
     value: float = 0.0
-    untried_actions: Set[str] = None  # Available modifications not yet tried
+    untried_actions: Set[str] = None  
     
     def __post_init__(self):
         self.children = [] if self.children is None else self.children
@@ -217,8 +217,6 @@ class MCTSOptimizer:
             actions.add('add_child')
 
         return actions
-
-
 
 
     def _try_simplify(self, node: Node) -> None:

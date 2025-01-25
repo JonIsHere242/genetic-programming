@@ -399,12 +399,10 @@ class SymbolicRegressor:
             complexity_mode=ComplexityMode[self.complexity_mode.upper()],
             complexity_ratio_limit=self.complexity_ratio_limit,
             verbose=self.verbose,
-            output_prefix="",
+            output_prefix=self.verbose_output_dir + "/" if self.verbose_output_dir else "",  # Convert directory to prefix
             use_progress_bar=True,
             total_generations=self.generations,
-            operation_preset=self._get_operation_preset(),
-            verbose_output_dir=self.verbose_output_dir,       # Pass new parameters
-            verbose_output_file=self.verbose_output_file      # Pass new parameters
+            operation_preset=self._get_operation_preset()
         )
 
         # Initialize population
